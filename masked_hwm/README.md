@@ -22,7 +22,7 @@ Below is an example training command. Note that some arguments must be filled in
 ```
 python train.py --with_act --genie_config genie/configs/cosmos_24_512.json --train_data_dir <path to train data> --val_data_dir <path to val data> --log_name cosmos_24_512 --output_dir logs --max_eval_steps 1000  --seed 5 --eval_every_n_steps 8000 --per_device_train_batch_size 4 --per_device_eval_batch_size 4  --gradient_accumulation_steps 2 --max_train_steps 60000 --learning_rate 0.00003
 ```
-
+Note that by default, the Base Block variant is trained. This can be changed by uncommenting the line containing the preferred block in `genie/st_transformer.py` (lines 883-885).
 Distributed training is supported using `python -m torch.distributed.run --nproc_per_node=2 --rdzv_backend=c10d --rdzv_endpoint=localhost:0 train.py`.
 
 ## Inference

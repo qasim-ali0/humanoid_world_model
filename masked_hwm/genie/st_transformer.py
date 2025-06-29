@@ -864,50 +864,50 @@ class STTransformerDecoder(nn.Module):
     ):
         super().__init__()
 
-        # blocks = []
-        # for i in range(num_layers):
-        #     if i < 4:
-        #         blocks.append(STBlockBase(num_heads=num_heads,
-        #         d_model=d_model,
-        #         qkv_bias=qkv_bias,
-        #         proj_bias=proj_bias,
-        #         qk_norm=qk_norm,
-        #         use_mup=use_mup,
-        #         attn_drop=attn_drop,
-        #         mlp_ratio=mlp_ratio,
-        #         mlp_bias=mlp_bias,
-        #         mlp_drop=mlp_drop,
-        #         use_rope=use_rope
-        #         ))
-        #     else:
-        #         blocks.append(STBlockFullSharing(num_heads=num_heads,
-        #         # blocks.append(STBlockModalitySharing(num_heads=num_heads,
-        #         # blocks.append(STBlockBase(num_heads=num_heads,
-        #         d_model=d_model,
-        #         qkv_bias=qkv_bias,
-        #         proj_bias=proj_bias,
-        #         qk_norm=qk_norm,
-        #         use_mup=use_mup,
-        #         attn_drop=attn_drop,
-        #         mlp_ratio=mlp_ratio,
-        #         mlp_bias=mlp_bias,
-        #         mlp_drop=mlp_drop,
-        #         use_rope=use_rope
-        #         ))
+        blocks = []
+        for i in range(num_layers):
+            if i < 4:
+                blocks.append(STBlockBase(num_heads=num_heads,
+                d_model=d_model,
+                qkv_bias=qkv_bias,
+                proj_bias=proj_bias,
+                qk_norm=qk_norm,
+                use_mup=use_mup,
+                attn_drop=attn_drop,
+                mlp_ratio=mlp_ratio,
+                mlp_bias=mlp_bias,
+                mlp_drop=mlp_drop,
+                use_rope=use_rope
+                ))
+            else:
+                # blocks.append(STBlockFullSharing(num_heads=num_heads,
+                # blocks.append(STBlockModalitySharing(num_heads=num_heads,
+                blocks.append(STBlockBase(num_heads=num_heads,
+                d_model=d_model,
+                qkv_bias=qkv_bias,
+                proj_bias=proj_bias,
+                qk_norm=qk_norm,
+                use_mup=use_mup,
+                attn_drop=attn_drop,
+                mlp_ratio=mlp_ratio,
+                mlp_bias=mlp_bias,
+                mlp_drop=mlp_drop,
+                use_rope=use_rope
+                ))
             
-        blocks = [STBlockOneStream(num_heads=num_heads,
-            # blocks.append(STBlockBase(num_heads=num_heads,
-            d_model=d_model,
-            qkv_bias=qkv_bias,
-            proj_bias=proj_bias,
-            qk_norm=qk_norm,
-            use_mup=use_mup,
-            attn_drop=attn_drop,
-            mlp_ratio=mlp_ratio,
-            mlp_bias=mlp_bias,
-            mlp_drop=mlp_drop,
-            use_rope=use_rope
-            ) for _ in range(num_layers)]
+        # blocks = [STBlockOneStream(num_heads=num_heads,
+        #     # blocks.append(STBlockBase(num_heads=num_heads,
+        #     d_model=d_model,
+        #     qkv_bias=qkv_bias,
+        #     proj_bias=proj_bias,
+        #     qk_norm=qk_norm,
+        #     use_mup=use_mup,
+        #     attn_drop=attn_drop,
+        #     mlp_ratio=mlp_ratio,
+        #     mlp_bias=mlp_bias,
+        #     mlp_drop=mlp_drop,
+        #     use_rope=use_rope
+        #     ) for _ in range(num_layers)]
                 
         self.layers = nn.ModuleList(blocks)
         self.with_act = with_act
