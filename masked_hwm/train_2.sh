@@ -1,0 +1,4 @@
+#!/bin/bash  
+export CUDA_VISIBLE_DEVICES=0
+python train.py --genie_config genie/configs/magvit_n32_h8_d256_v2.json --train_data_dir ../data/train_v1.1 --val_data_dir ../data/val_v1.1 --log_name train_2 --output_dir logs --max_eval_steps 12 --seed 3 --resume_from_checkpoint /pub0/qasim/1xgpt/1xgpt/checkpoints/GENIE_35M  --eval_every_n_steps 10000000000 --learning_rate 0.000025 --per_device_train_batch_size 4 # --window_size 32 --stride 15 
+# python train.py --genie_config genie/configs/magvit_n32_h8_d256_v2.json --train_data_dir ../data/train_v1.1 --val_data_dir ../data/val_v1.1 --log_name train_2 --output_dir logs --max_eval_steps 10 --per_device_train_batch_size 9 --seed 3 --resume_from_checkpoint /pub0/qasim/1xgpt/1xgpt/checkpoints/GENIE_35M --learning_rate 1e-5 # --window_size 32 --stride 15 
