@@ -213,8 +213,12 @@ class RawVideoDataset(TorchDataset):
             "past_frames": past_frames.astype(np.float32),
             "future_frames": future_frames.astype(np.float32),
             "future_frames_idxs": [
-                (start_idx, i)
-                for i in range(start_idx + self.n_input, start_idx + self.video_len)
+                i
+                for i in range(
+                    start_idx + self.n_input * self.down_sample,
+                    start_idx + self.video_len,
+                    self.down_sample,
+                )
             ],
         }
 

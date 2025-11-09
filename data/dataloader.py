@@ -40,6 +40,7 @@ def get_dataloaders(
     conditioning_manager=None,
     return_datasets=False,
     val_stride=None,
+    generator=None,
 ):
     """Factory function to return train and validation dataloaders based on the dataset type."""
     if data_type == "1xgpt_image":
@@ -83,12 +84,14 @@ def get_dataloaders(
             train_dataset,
             batch_size=train_batch_size,
             shuffle=True,
+            generator=generator,
             # collate_fn=partial(RawVideoDataset_collate_fn, cfg, vae),
             **get_dataloader_kwargs(),
         )
         val_dataloader = DataLoader(
             val_dataset,
             batch_size=val_batch_size,
+            generator=generator,
             # collate_fn=partial(RawVideoDataset_collate_fn, cfg, vae),
             shuffle=False,
             **get_dataloader_kwargs(),
@@ -155,6 +158,7 @@ def get_dataloaders(
             train_dataset,
             batch_size=train_batch_size,
             shuffle=True,
+            generator=generator,
             # collate_fn=partial(RawVideoDataset_collate_fn, cfg, vae),
             **get_dataloader_kwargs(),
         )
@@ -163,6 +167,7 @@ def get_dataloaders(
             batch_size=val_batch_size,
             # collate_fn=partial(RawVideoDataset_collate_fn, cfg, vae),
             shuffle=False,
+            generator=generator,
             **get_dataloader_kwargs(),
         )
 
@@ -202,6 +207,7 @@ def get_dataloaders(
         train_dataset,
         batch_size=train_batch_size,
         shuffle=True,
+        generator=generator,
         # collate_fn=no_collate_fn,
         **get_dataloader_kwargs(),
     )
@@ -210,6 +216,7 @@ def get_dataloaders(
         batch_size=val_batch_size,
         # collate_fn=no_collate_fn,
         shuffle=False,
+        generator=generator,
         **get_dataloader_kwargs(),
     )
 
