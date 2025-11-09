@@ -2,56 +2,38 @@ from functools import partial
 
 import torch
 import torchvision.transforms as transforms
-from einops import pack, unpack
 from torch.utils.data import DataLoader
 
-from .video_dataset import (
+from .future_frame_dataset import (
     FutureFrameDataset,
-    FutureFrameTestSet,
-    RawVideoDataset,
-    encode_batch_key,
-    encode_video_batch,
+    FutureFrameTestDataset,
+    FutureVideoDataset,
 )
+from .future_video_dataset import FutureVideoDataset
 
 
 def get_dataloaders(
-    data_type,
+    dataset_type,
     cfg,
-    hmwm_train_dir,
-    hmwm_val_dir,
-    coco_train_imgs,
-    coco_train_ann,
-    coco_val_imgs,
-    coco_val_ann,
-    conditioning_type,
-    image_size,
-    train_batch_size,
-    val_batch_size,
-    hmwm_test_dir=None,
-    test_batch_size=None,
-    num_past_frames=None,
-    num_future_frames=None,
     vae=None,
-    img_vae=None,
-    vid_vae=None,
-    conditioning_manager=None,
     return_datasets=False,
     val_stride=None,
     generator=None,
 ):
-    """Factory function to return train and validation dataloaders based on the dataset type."""
-    if data_type == "1xgpt_image":
-        assert (
-            conditioning_type != "text"
-        ), "Conditioning must not be 'text' for 1xgpt dataset."
-        train_dataset = RawImageDataset(hmwm_train_dir)
-        val_dataset = RawImageDataset(hmwm_val_dir)
-        if return_datasets:
-            return train_dataset, val_dataset
-    elif data_type == "1xgpt_future_frame":
-        assert (
-            conditioning_type != "text"
-        ), "Conditioning must not be 'text' for 1xgpt dataset."
+    """
+    Factory function to return train and validation dataloaders based on the dataset type.
+    """
+    hmwm_train_dir = cfg.data.hmwm_train_dir
+    hmwm_val_dir = cfg.data.hmwm_val_dir
+    hmwm_test_dir = cfg.data.hmwm_test_dir
+    train_batch_size = cfg.train.batch_size
+    val_batch_size = cfg.val.batch_size
+    test_batch_size = val_batch_size
+    conditioning_type = cfg.conditioning.type
+    num_past_frames = cfg.conditioning.num_past_frames
+    num_future_frames = cfg.conditioning.num_future_frames
+
+    if dataset_type == "1xgpt_future_frame":
         assert num_past_frames != None
         assert num_future_frames != None
         with_action = False
@@ -65,7 +47,7 @@ def get_dataloaders(
             n_intermediate=59,
             with_actions=with_action,
             stride=1,
-        )  # num_past_frames // 2
+        )
         val_dataset = FutureFrameDataset(
             hmwm_val_dir,
             cfg,
@@ -82,19 +64,18 @@ def get_dataloaders(
             batch_size=train_batch_size,
             shuffle=True,
             generator=generator,
-            # collate_fn=partial(RawVideoDataset_collate_fn, cfg, vae),
             **get_dataloader_kwargs(),
         )
         val_dataloader = DataLoader(
             val_dataset,
             batch_size=val_batch_size,
             generator=generator,
-            # collate_fn=partial(RawVideoDataset_collate_fn, cfg, vae),
             shuffle=False,
             **get_dataloader_kwargs(),
         )
         return train_dataloader, val_dataloader
-    elif data_type == "1xgpt_test":
+
+    elif dataset_type == "1xgpt_test":
         assert (
             conditioning_type != "text"
         ), "Conditioning must not be 'text' for 1xgpt dataset."
@@ -103,7 +84,7 @@ def get_dataloaders(
         with_action = False
         if conditioning_type == "action":
             with_action = True
-        test_dataset = FutureFrameTestSet(
+        test_dataset = FutureFrameTestDataset(
             hmwm_test_dir,
             cfg,
             n_input=17,
@@ -111,18 +92,18 @@ def get_dataloaders(
             n_intermediate=59,
             with_actions=with_action,
             stride=1,
-        )  # num_past_frames // 2
+        )
         if return_datasets:
             return test_dataset
         test_dataloader = DataLoader(
             test_dataset,
             batch_size=test_batch_size,
             shuffle=False,
-            # collate_fn=partial(RawVideoDataset_collate_fn, cfg, vae),
             **get_dataloader_kwargs(),
         )
         return test_dataloader
-    elif data_type == "1xgpt_video":
+
+    elif dataset_type == "1xgpt_video":
         assert (
             conditioning_type != "text"
         ), "Conditioning must not be 'text' for 1xgpt dataset."
@@ -131,7 +112,7 @@ def get_dataloaders(
         with_action = False
         if conditioning_type == "action":
             with_action = True
-        train_dataset = RawVideoDataset(
+        train_dataset = FutureVideoDataset(
             hmwm_train_dir,
             cfg,
             vae,
@@ -139,8 +120,8 @@ def get_dataloaders(
             n_output=num_future_frames,
             with_actions=with_action,
             stride=1,
-        )  # num_past_frames // 2
-        val_dataset = RawVideoDataset(
+        )
+        val_dataset = FutureVideoDataset(
             hmwm_val_dir,
             cfg,
             vae,
@@ -156,68 +137,20 @@ def get_dataloaders(
             batch_size=train_batch_size,
             shuffle=True,
             generator=generator,
-            # collate_fn=partial(RawVideoDataset_collate_fn, cfg, vae),
             **get_dataloader_kwargs(),
         )
         val_dataloader = DataLoader(
             val_dataset,
             batch_size=val_batch_size,
-            # collate_fn=partial(RawVideoDataset_collate_fn, cfg, vae),
             shuffle=False,
             generator=generator,
             **get_dataloader_kwargs(),
         )
 
         return train_dataloader, val_dataloader
-    elif data_type.lower() == "coco":
-        assert (
-            conditioning_type == "text"
-        ), "Conditioning must be 'text' for COCO dataset."
-        transform = transforms.Compose(
-            [
-                transforms.Resize((image_size, image_size)),
-                transforms.ToTensor(),
-                transforms.Normalize(
-                    mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
-                ),
-            ]
-        )
 
-        train_dataset = CustomCoco(
-            root=coco_train_imgs,
-            annFile=coco_train_ann,
-            text_tokenizer=conditioning_manager.get_module()["text"],
-            transform=transform,
-        )
-        val_dataset = CustomCoco(
-            root=coco_val_imgs,
-            annFile=coco_val_ann,
-            text_tokenizer=conditioning_manager.get_module()["text"],
-            transform=transform,
-        )
-        if return_datasets:
-            return train_dataset, val_dataset
     else:
-        raise ValueError(f"Unknown dataset type: {data_type}")
-
-    train_dataloader = DataLoader(
-        train_dataset,
-        batch_size=train_batch_size,
-        shuffle=True,
-        generator=generator,
-        # collate_fn=no_collate_fn,
-        **get_dataloader_kwargs(),
-    )
-    val_dataloader = DataLoader(
-        val_dataset,
-        batch_size=val_batch_size,
-        # collate_fn=no_collate_fn,
-        shuffle=False,
-        generator=generator,
-        **get_dataloader_kwargs(),
-    )
-
-    return train_dataloader, val_dataloader
+        raise ValueError(f"Unknown dataset type: {dataset_type}")
 
 
 def get_dataloader_kwargs():
@@ -242,9 +175,7 @@ def encode_batch(cfg, batch, accelerator, vae=None, img_vae=None, vid_vae=None):
         if type(batch["past_frames"]) == list:
             batch["past_frames"] = torch.concat(batch["past_frames"], 0)
         batch = encode_batch_key(cfg, batch, vid_vae, "past_frames", "past_latents")
-        # batch['future_frames'] = batch['future_frames'].squeeze(2)
         batch = encode_batch_key(cfg, batch, img_vae, "future_frames", "future_latents")
-        # batch['future_latents'] = batch['future_latents'].unsqueeze(2)
         return batch["future_latents"], batch
     else:
         imgs = batch["imgs"]
@@ -252,3 +183,72 @@ def encode_batch(cfg, batch, accelerator, vae=None, img_vae=None, vid_vae=None):
             imgs = imgs.to(getattr(torch, cfg.image_tokenizer.dtype))
             latents = vae.encode(imgs)[0]
         return latents, batch
+
+
+def encode_video_batch(cfg, batch, vae):
+    orig_dtype = batch["past_frames"].dtype
+    past_frames = batch["past_frames"].to(vae._dtype)
+    future_frames = batch["future_frames"].to(vae._dtype)
+    device = next(vae.parameters()).device
+    past_latents, _ = create_condition_latent(
+        vae,
+        past_frames,
+        cfg.conditioning.num_past_frames,
+        cfg.conditioning.num_future_frames,
+        cfg.conditioning.num_past_latents,
+        cfg.conditioning.num_future_latents,
+        device,
+    )
+    _, future_latents = create_label_latent(
+        vae,
+        past_frames,
+        future_frames,
+        cfg.conditioning.num_past_latents,
+        cfg.conditioning.num_future_latents,
+        device,
+    )
+    batch["past_latents"] = past_latents.to(orig_dtype)
+    batch["future_latents"] = future_latents.to(orig_dtype)
+    return batch
+
+
+def encode_batch_key(cfg, batch, vae, frame_key, latent_key):
+    orig_dtype = batch[frame_key].dtype
+    frames = batch[frame_key].to(vae._dtype)
+    device = next(vae.parameters()).device
+    (latent,) = vae.encode(frames.to(device))
+    batch[latent_key] = latent.to(orig_dtype)
+    return batch
+
+
+def create_condition_latent(
+    tokenizer,
+    past_frames,
+    num_past_frames,
+    num_future_frames,
+    num_past_latents,
+    num_future_latent,
+    device,
+):
+    B, C, T, H, W = past_frames.shape
+
+    padding_frames = past_frames.new_zeros(B, C, num_future_frames, H, W)
+    encode_past_frames = torch.cat([past_frames, padding_frames], dim=2)
+    (latent,) = tokenizer.encode(encode_past_frames.to(device))
+
+    past_latent = latent[:, :, :num_past_latents]
+    future_latent = latent[:, :, num_past_latents:]
+    assert future_latent.shape[2] == num_future_latent
+    return past_latent, future_latent
+
+
+def create_label_latent(
+    tokenizer, past_frames, future_frames, num_past_latents, num_future_latent, device
+):
+    B, C, T, H, W = past_frames.shape
+    all_frames = torch.concatenate((past_frames, future_frames), 2)
+    (latent,) = tokenizer.encode(all_frames.to(device))
+    past_latent = latent[:, :, :num_past_latents]
+    future_latent = latent[:, :, num_past_latents:]
+    assert future_latent.shape[2] == num_future_latent
+    return past_latent, future_latent
