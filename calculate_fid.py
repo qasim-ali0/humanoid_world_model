@@ -110,12 +110,7 @@ def main(cfg: DictConfig):
 
     # Main Model (UNet)
     latent_channels = tokenizer_config["latent_channels"]
-    model = get_model(
-        cfg,
-        latent_channels,
-        conditioning_manager,
-        cfg.image_size // cfg.image_tokenizer.spatial_compression,
-    )
+    model = get_model(cfg, latent_channels)
 
     # --- Load Trained Model Checkpoint ---
     # Determine the checkpoint path: Use eval.checkpoint_dir if provided, otherwise default to train.resume_model
@@ -160,20 +155,6 @@ def main(cfg: DictConfig):
         cfg.data.type,
         cfg,
         vae=vae_unwrapped,
-        hmwm_train_dir=cfg.data.hmwm_train_dir,
-        hmwm_val_dir=cfg.data.hmwm_val_dir,
-        # ... include all necessary arguments for get_dataloaders ...
-        coco_train_imgs=cfg.data.get("coco_train_imgs"),  # Use .get for safety
-        coco_val_imgs=cfg.data.get("coco_val_imgs"),
-        coco_train_ann=cfg.data.get("coco_train_ann"),
-        coco_val_ann=cfg.data.get("coco_val_ann"),
-        image_size=cfg.image_size,
-        train_batch_size=gen_batch_size,
-        val_batch_size=gen_batch_size,
-        conditioning_type=cfg.conditioning.type,
-        conditioning_manager=conditioning_manager,
-        num_past_frames=cfg.conditioning.get("num_past_frames"),
-        num_future_frames=cfg.conditioning.get("num_future_frames"),
         val_stride=1,
     )
 
@@ -197,7 +178,7 @@ def main(cfg: DictConfig):
     )
 
     # Determine number of samples (use length of dataloader)
-    num_samples = int(5000//3)
+    num_samples = int(5000 // 3)
     _ = (
         len(val_dataloader.dataset)
         if hasattr(val_dataloader, "dataset")
@@ -437,7 +418,7 @@ def main(cfg: DictConfig):
                 num_fid_to_calc = (
                     final_num_fid_samples  # Use all generated samples by default
                 )
-                
+
                 fid_score = fid.compute_fid(
                     real_dir,
                     fake_dir,

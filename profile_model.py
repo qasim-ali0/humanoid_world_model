@@ -28,7 +28,6 @@ from safetensors.torch import load_file
 # Import necessary components from your training script's modules
 import data  # Assuming data.py contains get_dataloaders and encode_batch
 import samplers  # Assuming samplers.py contains Sampler class
-from conditioning import ConditioningManager
 from models import get_model
 from schedulers import get_scheduler
 
@@ -133,9 +132,6 @@ def main(cfg: DictConfig):
     for param in vae.parameters():
         param.requires_grad = False
 
-    # Conditioning Manager
-    conditioning_manager = ConditioningManager(cfg.conditioning)
-
     # Noise Scheduler
     noise_scheduler = get_scheduler(cfg.model.scheduler_type, cfg.model.noise_steps)
 
@@ -145,9 +141,6 @@ def main(cfg: DictConfig):
     model = get_model(
         cfg,
         latent_channels,
-        conditioning_manager,
-        model_input_height_width,  # If model expects tuple (H,W)
-        # model_input_height_width, # Or just one if square
     )
 
     # --- Load Trained Model Checkpoint ---
@@ -168,9 +161,7 @@ def main(cfg: DictConfig):
 
     # --- Prepare Components with Accelerator (moves to device) ---
     # This will move models to `accelerator.device`
-    model, vae, conditioning_manager = accelerator.prepare(
-        model, vae, conditioning_manager
-    )
+    model, vae = accelerator.prepare(model, vae)
 
     model_unwrapped = extract_model_from_parallel(model)
     vae_unwrapped = extract_model_from_parallel(vae)
@@ -240,7 +231,6 @@ def main(cfg: DictConfig):
         train_batch_size=eval_batch_size,  # Use eval_batch_size
         val_batch_size=eval_batch_size,  # Use eval_batch_size
         conditioning_type=cfg.conditioning.type,
-        conditioning_manager=conditioning_manager,  # Pass prepared conditioning_manager
         num_past_frames=cfg.conditioning.get("num_past_frames"),
         num_future_frames=cfg.conditioning.get("num_future_frames"),
         val_stride=1,  # Ensure we get varied samples if dataloader is iterated multiple times

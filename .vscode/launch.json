@@ -13,7 +13,7 @@
             "args": ["one_sample=True"],
             "justMyCode": false,
             "env": {
-                "CUDA_VISIBLE_DEVICES": "0"
+                "CUDA_VISIBLE_DEVICES": "2"
             }
         },
         {
@@ -25,7 +25,7 @@
             "args": ["one_sample=True", "debug=True"],
             "justMyCode": false,
             "env": {
-                "CUDA_VISIBLE_DEVICES": "0"
+                "CUDA_VISIBLE_DEVICES": "2"
             }
         },
         {
@@ -68,10 +68,10 @@
             }
         },
         {
-            "name": "generate output videos",
+            "name": "generate videos",
             "type": "debugpy",
             "request": "launch",
-            "program": "generate_output_videos.py",
+            "program": "generate_videos.py",
             "console": "integratedTerminal",
             "args": ["debug=True"],
             "justMyCode": false,
