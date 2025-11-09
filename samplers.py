@@ -6,8 +6,7 @@ import tqdm
 from diffusers.utils import make_image_grid
 from einops import rearrange
 
-from configs import _UINT8_MAX_F
-from data import encode_batch, get_dataloaders
+from data import encode_batch
 
 
 class Sampler:
@@ -26,127 +25,6 @@ class Sampler:
         self.spatial_compression = spatial_compression
         self.latent_channels = latent_channels
         self.num_inference_steps = num_inference_steps
-
-    def sample_uncond_img(
-        self, unet, img_size, in_channels, dtype=torch.float32, device="cuda"
-    ):
-        batch_size = 16
-        if isinstance(img_size, int):
-            sample_height = img_size
-            sample_width = img_size
-            image_shape = (
-                batch_size,
-                in_channels,
-                img_size,
-                img_size,
-            )
-        else:
-            sample_height = img_size[0]
-            sample_width = img_size[1]
-            image_shape = (batch_size, in_channels, *img_size)
-
-        generator = torch.Generator(device=device).manual_seed(self.seed)
-        latents = torch.randn(
-            (
-                batch_size,
-                self.latent_channels,
-                sample_height // self.spatial_compression,
-                sample_width // self.spatial_compression,
-            ),
-            dtype=dtype,
-            device=device,
-            generator=generator,
-        )
-
-        self.scheduler.set_timesteps(self.num_inference_steps)
-        timesteps = self.scheduler.timesteps.to(device)
-        for t in self.progress_bar(timesteps):
-            # 1. predict noise model_output
-            # model_output = unet(latents, t).sample
-            batch = {
-                "noisy_latents": latents,
-            }
-            model_output = unet(batch, t)
-
-            # 2. compute previous image: x_t -> x_t-1
-            latents = self.scheduler.step(
-                model_output, t, latents, generator=generator
-            ).prev_sample
-
-        vae = self.vae.module if hasattr(self.vae, "module") else self.vae
-        pred_img = vae.decode(latents.to(torch.bfloat16))
-        pred_img = denormalize_img(pred_img)
-        pred_img = [PIL.Image.fromarray(s) for s in pred_img]
-        return pred_img
-
-    def sample_textcond_img(
-        self,
-        model,
-        img_size,
-        in_channels,
-        text_tokenizer,
-        prompt_file,
-        guidance_scale,
-        dtype=torch.float32,
-        device="cuda",
-    ):
-        n_samples = 16
-        if isinstance(img_size, int):
-            sample_height = img_size
-            sample_width = img_size
-            image_shape = (
-                n_samples,
-                in_channels,
-                img_size,
-                img_size,
-            )
-        else:
-            sample_height = img_size[0]
-            sample_width = img_size[1]
-            image_shape = (n_samples, in_channels, *img_size)
-
-        with open(prompt_file) as f:
-            user_prompts = f.readlines()
-            prompts = []
-            # extend the prompt cyclically if batch_size > len(user_prompts)
-            for i in range(n_samples):
-                prompts.append(user_prompts[i % len(user_prompts)])
-            prompts = text_tokenizer.tokenize(prompts)
-
-        generator = torch.Generator(device=device).manual_seed(self.seed)
-        latents = torch.randn(
-            (
-                n_samples,
-                self.latent_channels,
-                sample_height // self.spatial_compression,
-                sample_width // self.spatial_compression,
-            ),
-            dtype=dtype,
-            device=device,
-            generator=generator,
-        )
-
-        self.scheduler.set_timesteps(self.num_inference_steps)
-        timesteps = self.scheduler.timesteps.to(device)
-        for t in self.progress_bar(timesteps):
-            # 1. predict noise model_output
-            # model_output = unet(latents, t).sample
-            t = t.reshape(1, 1, 1, 1)
-            batch = {"noisy_latents": latents, "captions": prompts}
-            pred_cond = model(batch, t, device, use_cfg=False)
-            batch.pop("captions")
-            pred_uncond = model(batch, t, device, use_cfg=False)
-            pred = pred_uncond + guidance_scale * (pred_cond - pred_uncond)
-            # 2. compute previous image: x_t -> x_t-1
-            latents = self.scheduler.step(
-                pred, t, latents, generator=generator
-            ).prev_sample
-
-        vae = self.vae.module if hasattr(self.vae, "module") else self.vae
-        pred_img = vae.decode(latents.to(torch.bfloat16))
-        pred_img = denormalize_img(pred_img)
-        pred_img = [PIL.Image.fromarray(s) for s in pred_img]
-        return pred_img
 
     def sample_video(
         self,
@@ -193,9 +71,7 @@ class Sampler:
             )
             pred = pred_uncond + guidance_scale * (pred_cond - pred_uncond)
             # 2. compute previous image: x_t -> x_t-1
-            latents = self.scheduler.step(
-                pred, t, latents, generator=generator
-            ).prev_sample
+            latents = self.scheduler.step(pred, t, latents, generator=generator)
 
         vae = self.vae.module if hasattr(self.vae, "module") else self.vae
 
@@ -285,7 +161,7 @@ class Sampler:
             # 2. compute previous image: x_t -> x_t-1
             batch["noisy_latents"] = self.scheduler.step(
                 pred, t, batch["noisy_latents"], generator=generator
-            ).prev_sample
+            )
         img_vae = img_vae.module if hasattr(img_vae, "module") else img_vae
         # batch['noisy_latents'] = batch['noisy_latents'].squeeze(2)
         pred_img = img_vae.decode(batch["noisy_latents"].to(torch.bfloat16))
@@ -349,9 +225,7 @@ class Sampler:
                 )
                 pred = pred_uncond + guidance_scale * (pred_cond - pred_uncond)
                 # 2. compute previous image: x_t -> x_t-1
-                latents = self.scheduler.step(
-                    pred, t, latents, generator=generator
-                ).prev_sample
+                latents = self.scheduler.step(pred, t, latents, generator=generator)
                 final_pred_latents.append(latents[:, 0])
 
         final_pred_latents = torch.concat(final_pred_latents, 0).move_axis(0, 1)
@@ -425,6 +299,7 @@ def denormalize_img(preds):
     output_imgs = (preds.float() + 1.0) / 2.0
     output_imgs = rearrange(output_imgs, "b c h w -> b h w c")
     output_imgs = output_imgs.clamp(0, 1).cpu().numpy()
+    _UINT8_MAX_F = float(torch.iinfo(torch.uint8).max)
     output_imgs = output_imgs * _UINT8_MAX_F + 0.5
     output_imgs = output_imgs.astype(np.uint8)
     return output_imgs
@@ -434,6 +309,7 @@ def denormalize_video(preds):
     output_video = (preds.float() + 1.0) / 2.0
     output_video = rearrange(output_video, "b c t h w -> b t c h w")
     output_video = output_video.clamp(0, 1).cpu().numpy()
+    _UINT8_MAX_F = float(torch.iinfo(torch.uint8).max)
     output_video = output_video * _UINT8_MAX_F
     output_video = output_video.astype(np.uint8)
     return output_video
