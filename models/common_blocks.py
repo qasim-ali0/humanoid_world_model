@@ -1,14 +1,10 @@
 import math
-import time
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Optional
 
-import einops as eo
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
 from einops import pack, rearrange, repeat, unpack
-from timm.models.vision_transformer import Mlp, PatchEmbed
 from torch.nn.functional import scaled_dot_product_attention
 
 
@@ -808,362 +804,166 @@ def _rotate_half(x: torch.Tensor) -> torch.Tensor:
     return torch.cat((-x2, x1), dim=-1)
 
 
-class AttentionProfiler:
-    def __init__(self, device: str = "cuda"):
+# notice how there is both a modulate and a gat
+def modulate(x, scale, shift):
+    return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
+
+
+def gate(x, scale):
+    return x * scale.unsqueeze(1)
+
+
+class PatchVideo(nn.Module):
+    def __init__(self, dim_c, dim_t, dim_h, dim_w, dim_hidden, patch_s=2, patch_t=1):
+        super().__init__()
+        self.patch_s = patch_s
+        self.patch_t = patch_t
+        self.dim_c = dim_c
+        self.dim_t = dim_t
+        self.dim_h = dim_h
+        self.dim_w = dim_w
+        self.dim_hidden = dim_hidden
+        block_size = (self.patch_t, self.patch_s, self.patch_s)
+        self.proj = nn.Sequential(
+            # nn.GroupNorm(8, 16),
+            # nn.GELU(),
+            nn.Conv3d(dim_c, dim_hidden, kernel_size=block_size, stride=block_size),
+        )
+
+    def forward(self, x):
+        x = self.proj(x)
+        return x
+
+    def unpatchify(self, x):
         """
-        Initialize the profiler with the specified device.
-
-        Args:
-            device: Device to run the profiling on ('cuda' or 'cpu')
+        x: (N, T, L, W, patch_length * patch_width * C)
+        imgs: (N, C, D, H, W)
         """
-        self.device = device
-        self.attention_types = ["naive", "torch", "xformers", "flash"]
-        self.results = {}
+        dim_chnl = self.dim_c
+        pl = self.patch_s
+        pw = self.patch_s
+        pt = self.patch_t
 
-    def _generate_inputs(
-        self, batch_size: int, seq_len: int, dim: int, dtype=torch.float32
-    ) -> torch.Tensor:
-        """Generate random input tensors for profiling."""
-        return torch.randn(batch_size, seq_len, dim, device=self.device, dtype=dtype)
+        dim_time = self.dim_t
+        dim_length = self.dim_h
+        dim_width = self.dim_w
 
-    def _create_attention_module(
-        self, attn_type: str, dim: int, num_heads: int, dtype=torch.float32
-    ) -> Attention:
-        """Create an attention module with the specified configuration."""
-        return Attention(
-            dim=dim, num_heads=num_heads, qkv_bias=True, attn_type=attn_type
-        ).to(self.device)
+        b, d, t, h, w = x.shape
+        x = rearrange(x, "b d t h w -> b (t h w) d", b=b, d=d, t=t, h=h, w=w)
 
-    def profile_single_config(
-        self,
-        batch_size: int,
-        seq_len: int,
-        dim: int,
-        num_heads: int,
-        num_repeats: int = 100,
-        warmup: int = 10,
-        dtype=torch.float32,
-    ) -> Dict[str, float]:
-        """
-        Profile all attention types for a single configuration.
+        # Reshape to (N, num_time_patches, num_length_patches, num_width_patches, patch_length, patch_width, C)
+        x = x.reshape(shape=(b, t, h, w, pl, pw, dim_chnl))
 
-        Args:
-            batch_size: Batch size for input
-            seq_len: Sequence length for input
-            dim: Hidden dimension
-            num_heads: Number of attention heads
-            num_repeats: Number of times to repeat the forward pass for timing
-            warmup: Number of warmup runs before timing
+        # Transpose to (N, C, num_time_patches, patch_length, num_length_patches, patch_width, num_width_patches)
+        x = torch.einsum("ntlwpqc->nctlpwq", x)
 
-        Returns:
-            Dictionary of average execution times for each attention type
-        """
-        results = {}
-        inputs = self._generate_inputs(batch_size, seq_len, dim, dtype)
+        # Reshape to (N, C, num_time_patches * patch_length, num_length_patches * patch_width, num_width_patches)
+        imgs = x.reshape(shape=(b, dim_chnl, t * pt, h * pl, w * pw))
+        return imgs
 
-        for attn_type in self.attention_types:
-            try:
-                # Skip flash attention for CPU
-                if attn_type == "flash" and self.device == "cpu":
-                    print(f"Skipping flash attention on CPU as it's not supported")
-                    continue
 
-                model = self._create_attention_module(attn_type, dim, num_heads).to(
-                    dtype
-                )
-                model.eval()  # Set to evaluation mode to disable dropout
+def interleave_masks_2d(x, binary_vector):
+    binary_vector = binary_vector.to(torch.int32)
+    binary_mask = torch.zeros((b, t, h, w), device=x.device, dtype=x.dtype)
+    binary_mask[torch.where(binary_vector)] = 1.0
+    binary_mask = binary_mask.unsqueeze(1)
+    x = torch.concatenate((x, binary_mask), 1)
+    return x
 
-                # Warmup
-                for _ in range(warmup):
-                    with torch.no_grad():
-                        _ = model(inputs)
 
-                # Perform timing
-                start_time = time.time()
-                for _ in range(num_repeats):
-                    with torch.no_grad():
-                        _ = model(inputs)
+def interleave_masks_1d(x, binary_vector):
+    b, t, c = x.shape
+    binary_vector = binary_vector.to(torch.int32)
+    binary_mask = torch.zeros((b, t), device=x.device, dtype=x.dtype)
+    binary_mask[torch.where(binary_vector)] = 1.0
+    binary_mask = binary_mask.unsqueeze(-1)
+    x = torch.concatenate((x, binary_mask), -1)
+    return x
 
-                # Synchronize if using CUDA
-                if self.device == "cuda":
-                    torch.cuda.synchronize()
 
-                end_time = time.time()
-                avg_time = (end_time - start_time) / num_repeats * 1000  # Convert to ms
-                results[attn_type] = avg_time
+def interleave_actions(x, action):
+    b, c1, t, h, w = x.shape
+    b, c2, t = action.shape
+    action_expanded = action.view(b, c2, t, 1, 1).expand(-1, -1, -1, h, w)
+    # Concatenate along the channel dimension
+    x = torch.cat([x, action_expanded], dim=1)  # New shape: (B, C + C_action, T, H, W)
+    return x
 
-                print(
-                    f"Config [B={batch_size}, L={seq_len}, D={dim}, H={num_heads}] "
-                    f"- {attn_type}: {avg_time:.3f} ms"
-                )
 
-            except Exception as e:
-                print(f"Error profiling {attn_type} attention: {e}")
-                results[attn_type] = float("nan")
+class PatchVideoTempMask(PatchVideo):
+    def __init__(self, dim_c, dim_t, dim_h, dim_w, dim_hidden, patch_s=2, patch_t=1):
+        nn.Module.__init__(self)
+        self.patch_s = patch_s
+        self.patch_t = patch_t
+        self.dim_c = dim_c
+        self.dim_t = dim_t
+        self.dim_h = dim_h
+        self.dim_w = dim_w
+        self.dim_hidden = dim_hidden
+        block_size = (self.patch_t, self.patch_s, self.patch_s)
+        self.proj = nn.Conv3d(
+            dim_c + 1, dim_hidden, kernel_size=block_size, stride=block_size
+        )
 
-        return results
+    def forward(self, x):
+        x = self.proj(x)
+        return x
 
-    def profile_varying_sequence_length(
-        self,
-        batch_size: int,
-        seq_lengths: List[int],
-        dim: int,
-        num_heads: int,
-        num_repeats: int = 100,
-        dtype=torch.float32,
+
+class AdaLayerNormZero(nn.Module):
+    def __init__(
+        self, input_dim, embedding_dim: int, param_factor, bias=True, n_context=0
     ):
-        """Profile with varying sequence lengths."""
-        results = {attn_type: [] for attn_type in self.attention_types}
+        super().__init__()
+        self.silu = nn.SiLU()
+        self.n_context = int(n_context)
+        self.n_chunks = (1 + self.n_context) * int(param_factor)
+        self.linear = nn.Linear(input_dim, self.n_chunks * embedding_dim, bias=bias)
+        self.initialize_weights()
 
-        for seq_len in seq_lengths:
-            print(f"\nProfiling with sequence length {seq_len}")
-            config_result = self.profile_single_config(
-                batch_size, seq_len, dim, num_heads, num_repeats, dtype=dtype
-            )
+    def forward(self, x):
+        emb = self.linear(self.silu(x))
+        ret = emb.chunk(self.n_chunks, dim=1)
+        return ret  # [x.unsqueeze(1) for x in ret]
 
-            for attn_type, time_ms in config_result.items():
-                results[attn_type].append(time_ms)
-
-        self.results["seq_length"] = {"seq_lengths": seq_lengths, "times": results}
-        return results
-
-    def profile_varying_hidden_dim(
-        self,
-        batch_size: int,
-        seq_len: int,
-        dims: List[int],
-        num_heads_list: Optional[List[int]] = None,
-        num_repeats: int = 100,
-        dtype=torch.float32,
-    ):
-        """Profile with varying hidden dimensions."""
-        if num_heads_list is None:
-            # Default to dim / 64 heads
-            num_heads_list = [dim // 64 for dim in dims]
-
-        assert len(dims) == len(
-            num_heads_list
-        ), "dims and num_heads_list must have same length"
-
-        results = {attn_type: [] for attn_type in self.attention_types}
-
-        for dim, num_heads in zip(dims, num_heads_list):
-            print(f"\nProfiling with dimension {dim} and {num_heads} heads")
-            config_result = self.profile_single_config(
-                batch_size, seq_len, dim, num_heads, num_repeats, dtype=dtype
-            )
-
-            for attn_type, time_ms in config_result.items():
-                results[attn_type].append(time_ms)
-
-        self.results["hidden_dim"] = {
-            "dims": dims,
-            "num_heads": num_heads_list,
-            "times": results,
-        }
-        return results
-
-    def profile_varying_batch_size(
-        self,
-        batch_sizes: List[int],
-        seq_len: int,
-        dim: int,
-        num_heads: int,
-        num_repeats: int = 100,
-        dtype=torch.float32,
-    ):
-        """Profile with varying batch sizes."""
-        results = {attn_type: [] for attn_type in self.attention_types}
-
-        for batch_size in batch_sizes:
-            print(f"\nProfiling with batch size {batch_size}")
-            config_result = self.profile_single_config(
-                batch_size, seq_len, dim, num_heads, num_repeats, dtype=dtype
-            )
-
-            for attn_type, time_ms in config_result.items():
-                results[attn_type].append(time_ms)
-
-        self.results["batch_size"] = {"batch_sizes": batch_sizes, "times": results}
-        return results
-
-    def profile_memory_usage(
-        self,
-        batch_size: int,
-        seq_len: int,
-        dim: int,
-        num_heads: int,
-        dtype=torch.float32,
-    ):
-        """Profile memory usage for each attention type."""
-        if self.device != "cuda":
-            print("Memory profiling is only available on CUDA devices")
-            return {}
-
-        memory_usage = {}
-        inputs = self._generate_inputs(batch_size, seq_len, dim, dtype)
-
-        for attn_type in self.attention_types:
-            try:
-                # Skip flash attention for CPU
-                if attn_type == "flash" and self.device == "cpu":
-                    continue
-
-                # Clear cache
-                torch.cuda.empty_cache()
-                torch.cuda.reset_peak_memory_stats()
-
-                model = self._create_attention_module(attn_type, dim, num_heads).to(
-                    dtype
-                )
-
-                # Forward pass
-                with torch.no_grad():
-                    _ = model(inputs)
-
-                # Get memory stats
-                memory_used = torch.cuda.max_memory_allocated() / (1024**2)  # MB
-                memory_usage[attn_type] = memory_used
-
-                print(
-                    f"Config [B={batch_size}, L={seq_len}, D={dim}, H={num_heads}] "
-                    f"- {attn_type}: {memory_used:.2f} MB"
-                )
-
-            except Exception as e:
-                print(f"Error profiling memory for {attn_type} attention: {e}")
-                memory_usage[attn_type] = float("nan")
-
-        self.results["memory"] = memory_usage
-        return memory_usage
-
-    def plot_results(self, save_path: Optional[str] = None):
-        """Plot the profiling results."""
-        fig, axs = plt.subplots(3, 1, figsize=(12, 18))
-
-        # Plot 1: Sequence Length vs. Time
-        if "seq_length" in self.results:
-            data = self.results["seq_length"]
-            seq_lengths = data["seq_lengths"]
-            times = data["times"]
-
-            for attn_type, time_list in times.items():
-                if any(not np.isnan(t) for t in time_list):
-                    axs[0].plot(seq_lengths, time_list, marker="o", label=attn_type)
-
-            axs[0].set_xlabel("Sequence Length")
-            axs[0].set_ylabel("Time (ms)")
-            axs[0].set_title("Attention Performance vs. Sequence Length")
-            axs[0].legend()
-            axs[0].grid(True)
-
-        # Plot 2: Hidden Dimension vs. Time
-        if "hidden_dim" in self.results:
-            data = self.results["hidden_dim"]
-            dims = data["dims"]
-            times = data["times"]
-
-            for attn_type, time_list in times.items():
-                if any(not np.isnan(t) for t in time_list):
-                    axs[1].plot(dims, time_list, marker="o", label=attn_type)
-
-            axs[1].set_xlabel("Hidden Dimension")
-            axs[1].set_ylabel("Time (ms)")
-            axs[1].set_title("Attention Performance vs. Hidden Dimension")
-            axs[1].legend()
-            axs[1].grid(True)
-
-        # Plot 3: Batch Size vs. Time
-        if "batch_size" in self.results:
-            data = self.results["batch_size"]
-            batch_sizes = data["batch_sizes"]
-            times = data["times"]
-
-            for attn_type, time_list in times.items():
-                if any(not np.isnan(t) for t in time_list):
-                    axs[2].plot(batch_sizes, time_list, marker="o", label=attn_type)
-
-            axs[2].set_xlabel("Batch Size")
-            axs[2].set_ylabel("Time (ms)")
-            axs[2].set_title("Attention Performance vs. Batch Size")
-            axs[2].legend()
-            axs[2].grid(True)
-
-        plt.tight_layout()
-
-        if save_path:
-            plt.savefig(save_path)
-            print(f"Results saved to {save_path}")
-        else:
-            plt.show()
-
-    def summarize_results(self):
-        """Print a summary of the profiling results."""
-        print("\n===== ATTENTION PROFILING SUMMARY =====")
-
-        if "memory" in self.results:
-            print("\nMemory Usage (MB):")
-            # memory_data = self.
+    def initialize_weights(self):
+        nn.init.constant_(self.linear.weight, 0.0)
+        nn.init.constant_(self.linear.bias, 0.0)
 
 
-if __name__ == "__main__":
-    profiler = AttentionProfiler("cuda")
+class AdaLayerNorm(AdaLayerNormZero):
+    def initialize_weights(self):
+        nn.init.normal_(self.linear.weight, std=0.02)
+        nn.init.normal_(self.linear.bias, std=0.02)
 
-    print("vary seq len", "torch.float32")
-    print(
-        profiler.profile_varying_sequence_length(
-            16, [256, 512, 768, 1024, 2048], 512, 8, dtype=torch.float32
+
+class AdaLayerNormIdentity(AdaLayerNormZero):
+    def initialize_weights(self):
+        nn.init.constant_(self.linear.weight, 1.0)
+        nn.init.constant_(self.linear.bias, 0.0)
+
+
+class FinalLayer(nn.Module):
+    """
+    Based off of Facebook's DiT
+    https://github.com/facebookresearch/DiT/blob/main/models.py
+    """
+
+    def __init__(self, hidden_size, patch_lw, patch_t, out_channels):
+        super().__init__()
+        self.norm_final = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
+        self.adaLN_modulation = AdaLayerNormZero(
+            hidden_size, hidden_size, 2.0
+        )  # nn.Sequential( nn.SiLU(), nn.Linear(hidden_size, 2 * hidden_size, bias=True))
+        self.linear = nn.Linear(
+            hidden_size, patch_lw * patch_lw * patch_t * out_channels, bias=False
         )
-    )
 
-    print("vary seq len", "torch.bfloat16")
-    print(
-        profiler.profile_varying_sequence_length(
-            16, [256, 512, 768, 1024, 2048], 512, 8, dtype=torch.bfloat16
-        )
-    )
-
-    print("vary hidden dim", "torch.float32")
-    print(
-        profiler.profile_varying_hidden_dim(
-            16, 512, [256, 512, 768, 1024, 2048], [8, 8, 8, 8, 8], dtype=torch.float32
-        )
-    )
-
-    print("vary hidden dim", "torch.bfloat16")
-    print(
-        profiler.profile_varying_hidden_dim(
-            16, 512, [256, 512, 768, 1024, 2048], [8, 8, 8, 8, 8], dtype=torch.bfloat16
-        )
-    )
-
-    print("vary batch size", "torch.float32")
-    print(
-        profiler.profile_varying_batch_size(
-            [16, 16, 24, 32], 512, 512, 8, dtype=torch.float32
-        )
-    )
-
-    print("vary batch size", "torch.bfloat16")
-    print(
-        profiler.profile_varying_batch_size(
-            [16, 16, 24, 32], 512, 512, 8, dtype=torch.bfloat16
-        )
-    )
-
-    print("memory", "torch.float32")
-    print(profiler.profile_memory_usage(16, 1024, 512, 8, torch.float32))
-
-    print("memory", "torch.bfloat16")
-    print(profiler.profile_memory_usage(16, 1024, 512, 8, torch.bfloat16))
-
-    pos_embedder = VideoRopePosition3DEmb(
-        head_dim=64, len_h=32, len_w=32, len_t=16, base_fps=30
-    ).to("cuda")
-    x = torch.randn((5, 16, 32, 32, 64))
-    y = apply_rotary_pos_emb(
-        torch.randn((5, 8, 50, 64), device="cuda"),
-        freqs=pos_embedder.generate_embeddings(
-            (5, 16, 32, 32, 64),
-        ),
-    )
+    def forward(self, x, timesteps):
+        b, d, t, h, w = x.shape
+        x = rearrange(x, "b d t h w -> b (t h w) d", b=b, d=d, t=t, h=h, w=w)
+        shift, scale = self.adaLN_modulation(timesteps)
+        x = modulate(self.norm_final(x), shift, scale)
+        x = self.linear(x)
+        x = rearrange(x, "b (t h w) d -> b d t h w", b=b, t=t, h=h, w=w)
+        return x

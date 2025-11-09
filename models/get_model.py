@@ -1,30 +1,13 @@
 from diffusers import UNet2DModel
 
-from .dit_imgs import DiTImgModel
-from .dit_video import (
-    VideoDiTFullSharingModel,
-    VideoDiTFutureFrameModel,
-    VideoDiTModalitySharingModel,
-    VideoDiTModel,
-    VideoDiTSplitAttnModel,
-    VideoUViTModel,
-)
-from .unet import UNet
+from .mmdit import VideoDiTFutureFrameModel, VideoDiTModel
+from .mmdit_sharing import VideoDiTFullSharingModel, VideoDiTModalitySharingModel
+from .mmdit_split_attn import VideoDiTSplitAttnModel
+from .uvit import VideoUViTModel
 
 
-def get_model(cfg, latent_channels, input_size, conditioning_manager=None):
-    if "unet" in cfg.model.type:
-        model = UNet(
-            latent_channels,
-            latent_channels,
-            cfg.model.unet_blocks,
-            256,
-            conditioning_manager=conditioning_manager,
-            cfg_prob=cfg.model.cfg_prob,
-            unet_attention_resolutions=cfg.model.unet_attention_resolutions,
-        )
-        return model
-    elif cfg.model.type == "hf":
+def get_model(cfg, latent_channels):
+    if cfg.model.type == "hf":
         model = UNet2DModel(
             sample_size=cfg.model.image_size,  # the target image resolution
             in_channels=latent_channels,  # the number of input channels, 3 for RGB images
@@ -55,28 +38,6 @@ def get_model(cfg, latent_channels, input_size, conditioning_manager=None):
             ),
         )
         return model
-    elif cfg.model.type.lower() == "dit_xl_2":
-        return DiTImgModel(
-            depth=28,
-            hidden_size=1152,
-            patch_size=2,
-            num_heads=16,
-            in_channels=latent_channels,
-            input_size=input_size,
-            cfg_prob=cfg.model.cfg_prob,
-            conditioning_manager=conditioning_manager,
-        )
-    elif cfg.model.type.lower() == "dit_s_2":
-        return DiTImgModel(
-            depth=12,
-            hidden_size=384,
-            patch_size=2,
-            num_heads=6,
-            in_channels=latent_channels,
-            input_size=input_size,
-            cfg_prob=cfg.model.cfg_prob,
-            conditioning_manager=conditioning_manager,
-        )
     elif cfg.model.type.lower() == "video_dit":
         dim_spatial = cfg.image_size // cfg.image_tokenizer.spatial_compression
         return VideoDiTModel(
