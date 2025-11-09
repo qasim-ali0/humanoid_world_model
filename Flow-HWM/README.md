@@ -1,8 +1,7 @@
-# Generating Humanoid Futures: Multimodal Joint Attention Between Past and Future for Action-Guided Video Prediction
+# Flow Matching variant of Humanoid World Model
 
-Author: **Qasim Ali**  
+Authors: **Qasim Ali, Aditya Sridhar**  
 License: **MIT License**  
-
 ---
 
 ## Overview

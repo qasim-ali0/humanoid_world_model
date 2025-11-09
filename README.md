@@ -1,7 +1,7 @@
-# Generating Humanoid Futures: Multimodal Joint Attention Between Past and Future for Action-Guided Video Prediction
+# Humanoid World Models: Open World Foundation Models for Humanoid Robotics
 
-Author: **Qasim Ali**  
-License: **MIT License**  
+Authors: **Qasim Ali, Aditya Sridhar**  
+License: **MIT License**   
 
 ---
 
@@ -17,6 +17,7 @@ See their respective folder for how to run them.
 The dataset used for training was provided by the **1xgpt contest**, and we extend our gratitude to 1xgpt for making this data available.
 
 [Project Page](https://qasim-ali0.github.io/projects/humanoid_world_model/)
+
 [Paper](https://arxiv.org/abs/2506.01182)
 
 <p align="center">
