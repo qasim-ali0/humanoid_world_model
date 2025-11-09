@@ -7,11 +7,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 import torch
-from einops import pack
 from torch.utils.data import Dataset as TorchDataset
-from torch.utils.data import default_collate
-
-_UINT8_MAX_F = float(torch.iinfo(torch.uint8).max)
 
 
 class RawVideoDataset(TorchDataset):
@@ -28,6 +24,8 @@ class RawVideoDataset(TorchDataset):
         down_sample=2,
     ):
         super().__init__()
+        self._UINT8_MAX_F = float(torch.iinfo(torch.uint8).max)
+
         # mp.set_start_method('spawn')
 
         self.data_dir = Path(data_dir)
@@ -201,7 +199,7 @@ class RawVideoDataset(TorchDataset):
         )
 
         frames = np.moveaxis(frames, 3, 0)
-        frames = frames / _UINT8_MAX_F * 2.0 - 1.0
+        frames = frames / self._UINT8_MAX_F * 2.0 - 1.0
 
         frames = frames[:, :: self.down_sample]
         past_frames = frames[:, : self.n_input]
@@ -258,6 +256,7 @@ class FutureFrameDataset(RawVideoDataset):
     ):
         TorchDataset.__init__(self)
         # mp.set_start_method('spawn')
+        self._UINT8_MAX_F = float(torch.iinfo(torch.uint8).max)
 
         self.data_dir = Path(data_dir)
         self.cfg = cfg
@@ -374,7 +373,7 @@ class FutureFrameDataset(RawVideoDataset):
             start_shard_idx, end_shard_idx, start_frame_idx, end_frame_idx
         )
         in_frames = np.moveaxis(in_frames, 3, 0)
-        in_frames = in_frames / _UINT8_MAX_F * 2.0 - 1.0
+        in_frames = in_frames / self._UINT8_MAX_F * 2.0 - 1.0
 
         ret = {}
         if self.with_actions:
@@ -394,7 +393,7 @@ class FutureFrameDataset(RawVideoDataset):
             start_shard_idx, start_shard_idx, start_frame_idx, start_frame_idx + 1
         )
         out_frame = np.moveaxis(out_frame, 3, 0)
-        out_frame = out_frame / _UINT8_MAX_F * 2.0 - 1.0
+        out_frame = out_frame / self._UINT8_MAX_F * 2.0 - 1.0
 
         ret["past_frames"] = (in_frames.astype(np.float32),)
         ret["future_frames"] = out_frame.astype(np.float32)
@@ -414,6 +413,8 @@ class FutureFrameTestSet(RawVideoDataset):
         with_actions=True,
     ):
         TorchDataset.__init__(self)
+        self._UINT8_MAX_F = float(torch.iinfo(torch.uint8).max)
+
         # mp.set_start_method('spawn')
 
         self.data_dir = Path(data_dir)
@@ -532,7 +533,7 @@ class FutureFrameTestSet(RawVideoDataset):
     def __getitem__(self, idx):
         in_frames = self.extract_frames_opencv(idx, idx, 0, 17)
         in_frames = np.moveaxis(in_frames, 3, 0)
-        in_frames = in_frames / _UINT8_MAX_F * 2.0 - 1.0
+        in_frames = in_frames / self._UINT8_MAX_F * 2.0 - 1.0
 
         ret = {}
         if self.with_actions:
