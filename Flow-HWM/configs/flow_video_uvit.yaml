@@ -1,0 +1,70 @@
+train:
+  batch_size: 9 
+  learning_rate: 1e-4
+  lr_warmup_steps: 0
+  num_epochs: 500
+  gradient_accumulation_steps: 9
+  val_iters: 4000
+  save_model_iters: 2000
+  resume_train: false
+  resume_model: "/pub0/qasim/1xgpt/humanoid_world_model/val/12-26-12-49/checkpoint-0-5"
+
+val:
+  run: true
+  batch_size: 8
+  skip_val_loss: False
+  skip_img_sample: False
+
+image_size: 256
+debug: False
+one_sample: False
+seed: 0
+log_dir: "/pub0/qasim/1xgpt/humanoid_world_model/logs"
+exp_prefix: "VideoDiT"
+dtype: 'bf16'
+mixed_precision: "bf16"  # Options: ["no", "fp16", "bf16"]
+gen_type: 'video'
+use_discrete_time: False
+
+model:
+  type: 'video_uvit'
+  unet_blocks: [256, 512, 768, 1024, 1536]
+  unet_attention_resolutions: [32, 16, 8, 4]
+  noise_steps:  100
+  scheduler_type: "Flow"
+  cfg_scale: 3
+  cfg_prob: 0.15
+  ema_inv_gamma: 1.0
+  ema_power: 0.75
+  ema_max_decay: 0.999
+  token_dim: 1152
+  num_heads: 16
+  num_layers: 15
+  patch_size: 2
+
+data:
+  type: "1xgpt_video"
+  hmwm_train_dir: "/pub4/qasim/1xgpt/data/data_v2_raw/train_v2.0_raw"
+  hmwm_val_dir: "/pub4/qasim/1xgpt/data/data_v2_raw/val_v2.0_raw"
+  hmwm_test_dir: "/pub4/qasim/1xgpt/data/data_sampling/test_v2.0"
+  coco_train_imgs: "/pub0/data/mscoco_2017/coco/images/train2017"
+  coco_train_ann: "/pub0/data/mscoco_2017/coco/annotations/captions_train2017.json"
+  coco_val_imgs: "/pub0/data/mscoco_2017/coco/images/val2017"
+  coco_val_ann: "/pub0/data/mscoco_2017/coco/annotations/captions_val2017.json"
+
+conditioning:
+  type: "action"
+  text_tokenizer: "CLIP"  # Options: ["T5", "CLIP"]
+  prompt_file: "sample_prompts.txt"
+  num_past_frames: 9
+  num_future_frames: 8
+  num_past_latents: 2
+  num_future_latents: 1
+  dim_act: 25
+
+image_tokenizer:
+  path: "/pub0/qasim/1xgpt/Cosmos-Tokenizer/pretrained_ckpts"
+  tokenizer_type: "CV"  # Options: ["CI", "DI"]
+  spatial_compression: 8
+  temporal_compression: 8
+  dtype: "bfloat16"

@@ -9,9 +9,20 @@ License: **MIT License**
 
 This repository contains the implementation of a world model for humanoid robots, designed to generate future video frames conditioned on past video frames, past actions, and future actions. The project is titled **"Generating Humanoid Futures: Multimodal Joint Attention Between Past and Future for Action-Guided Video Prediction"** and will be submitted to the Humanoid Workshop at CVPR 2025.
 
-The model leverages **flow matching** for training and incorporates **joint attention** mechanisms inspired by image generation techniques (e.g., Stable Diffusion 3). These mechanisms are adapted to video generation, replacing the traditional two-stage attention with a more parameter-efficient joint attention scheme. The goal is to reduce the parameter count while maintaining high performance.
+There are two variants to this model:
+* Masked-HWM: A masked transformer generative model (similar to Genie 1). 
+* Flow-HWM: A multimodal DiT architecture (similar to DiTAir) is a flow matching model. 
+See their respective folder for how to run them.
 
 The dataset used for training was provided by the **1xgpt contest**, and we extend our gratitude to 1xgpt for making this data available.
+
+[Project Page](https://qasim-ali0.github.io/projects/humanoid_world_model/)
+[Paper](https://arxiv.org/abs/2506.01182)
+
+<p align="center">
+  <img src="assets/flow2_gen.gif" alt="Flow-HWM samples" width="45%" />
+  <img src="assets/mask5_gen.gif" alt="Masked-HWM samples" width="45%" />
+</p>
 
 ---
 
@@ -36,110 +47,11 @@ The dataset used for training was provided by the **1xgpt contest**, and we exte
 
 4. Install the cosmos tokenizer from the [repo](https://github.com/NVIDIA/Cosmos-Tokenizer).
 
----
+--- 
+## Abstract 
 
-## Usage
+> Humanoid robots, with their human-like form, are uniquely suited for interacting in environments built for people. However, enabling humanoids to reason, plan, and act in complex open-world settings remains a challenge. World models, models that predict the future outcome of a given action, can support these capabilities by serving as a dynamics model in long-horizon planning and generating synthetic data for policy learning. We introduce Humanoid World Models (HWM), a family of lightweight, open-source models that forecast future egocentric video conditioned on humanoid control tokens. We train two types of generative models, Masked Transformers and Flow-Matching, on 100 hours of humanoid demonstrations. Additionally, we explore architectural variants with different attention mechanisms and parameter-sharing strategies. Our parameter-sharing techniques reduce model size by 33-53% with minimal impact on performance or visual fidelity. HWMs are designed to be trained and deployed in practical academic and small-lab settings, such as 1-2 GPUs.
 
-The repository includes several scripts for training, evaluation, and debugging. Below are the instructions for running these scripts. The configurations for debugging and training are defined in `.vscode/launch.json`.
-
-### 1. **Training the Model**
-   To train the model, use the `train.py` script:
-   ```bash
-   python train.py
-   ```
-   Example debug configuration:
-   ```jsonc
-   {
-       "name": "train (one sample)",
-       "type": "debugpy",
-       "request": "launch",
-       "program": "train.py",
-       "console": "integratedTerminal",
-       "args": ["one_sample=True"],
-       "justMyCode": false,
-       "env": {
-           "CUDA_VISIBLE_DEVICES": "0"
-       }
-   }
-   ```
-
-### 2. **Evaluating the Model**
-   To evaluate the model, use the `eval_diffusion.py` script:
-   ```bash
-   python eval_diffusion.py
-   ```
-   Example debug configuration:
-   ```jsonc
-   {
-       "name": "eval",
-       "type": "debugpy",
-       "request": "launch",
-       "program": "eval_diffusion.py",
-       "console": "integratedTerminal"
-   }
-   ```
-
-### 3. **Profiling the Model**
-   To profile the model, use the `profile_model.py` script:
-   ```bash
-   python profile_model.py
-   ```
-   Example debug configuration:
-   ```jsonc
-   {
-       "name": "profiler",
-       "type": "debugpy",
-       "request": "launch",
-       "program": "profile_model.py",
-       "console": "integratedTerminal"
-   }
-   ```
-
-### 4. **Distributed Training**
-   For distributed training, use the `torch.distributed.run` module:
-   ```bash
-   python -m torch.distributed.run --nproc_per_node=2 train.py
-   ```
-   Example debug configuration:
-   ```jsonc
-   {
-       "name": "train (distributed + debug)",
-       "type": "python",
-       "request": "launch",
-       "module": "torch.distributed.run",
-       "console": "integratedTerminal",
-       "args": [
-           "--nproc_per_node=1",
-           "--rdzv_backend", 
-           "c10d",
-           "--rdzv_endpoint", 
-           "localhost:29500",
-           "--nnodes=1",
-           "train.py",
-           "debug=True"
-       ],
-       "justMyCode": false,
-       "env": {
-           "CUDA_VISIBLE_DEVICES": "1,2",
-           "TORCH_NCCL_DEBUG": "INFO",
-           "TORCH_DISTRIBUTED_DEBUG": "DETAIL",
-           "NCCL_P2P_DISABLE": "0",
-           "NCCL_ASYNC_ERROR_HANDLING": "1"
-       }
-   }
-   ```
-
----
-
-## Project Structure
-
-- **`models/`**: Contains the implementation of the video generation models, including joint attention mechanisms and parameter reduction schemes.
-- **`data/`**: Handles data loading and preprocessing for the 1xgpt dataset.
-- **`configs/`**: YAML configuration files for training and evaluation.
-- **`train.py`**: Main training script.
-- **`eval_diffusion.py`**: Script for evaluating the model.
-- **`profile_model.py`**: Script for profiling the model.
-- **`.vscode/launch.json`**: Debug configurations for various scripts.
 
 ---
 
